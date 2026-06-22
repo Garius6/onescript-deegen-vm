@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>OsbcExport</RootNamespace>
+    <AssemblyName>osbc-export</AssemblyName>
+  </PropertyGroup>
+
+  <!--
+    Path-based references to the upstream OneScript projects (cloned in research/upstream).
+    We deliberately depend on the live sources so the bootstrap utility stays in sync with the
+    bytecode shapes we serialize.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\research\upstream\src\ScriptEngine\ScriptEngine.csproj" />
+    <ProjectReference Include="..\..\research\upstream\src\ScriptEngine.HostedScript\ScriptEngine.HostedScript.csproj" />
+    <ProjectReference Include="..\..\research\upstream\src\OneScript.Core\OneScript.Core.csproj" />
+    <ProjectReference Include="..\..\research\upstream\src\OneScript.Language\OneScript.Language.csproj" />
+    <ProjectReference Include="..\..\research\upstream\src\OneScript.StandardLibrary\OneScript.StandardLibrary.csproj" />
+  </ItemGroup>
+
+</Project>
