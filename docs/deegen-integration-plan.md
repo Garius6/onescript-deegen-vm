@@ -13,7 +13,16 @@
 - `drt/`, `deegen/` — собственно meta-compiler, генерирует interpreter + baseline JIT из аннотаций
 - `main.cpp` + `ljr-build` — entry-point `luajitr` который грузит и выполняет Lua-bytecode
 
-**Ключевое наблюдение**: Deegen-LJR это **готовая Lua-VM**, а не "выбирай свой язык". Чтобы получить наш OneScript-VM через Deegen, два пути:
+**Уточнение после повторного прохода**: ядро Deegen в `deegen/` и `drt/` **язык-агностично**. NaN-boxed `TValue` поддерживает универсальные типы (`tNil`, `tBool`, `tDouble`, `tInt32`, `tHeapEntity`) — этого хватает для PoC OneScript без переделки. Lua-специфика сосредоточена в:
+
+- `annotated/bytecodes/` — Lua-опкоды (пишем свои)
+- `runtime/` — Lua runtime: TableObject, Lua-строки, GC, parser/lexer Lua (заменяем минимальным своим)
+- `main.cpp` — `luajitr` entry-point (пишем свой)
+- Lua-специфичные subtypes в `tvalue.h` (`tTable`, `tString`, `tFunction`) — нам не нужны для PoC
+
+Это означает что Путь B **намного дешевле**, чем казалось на первом прохождении. Не "форк всего", а "Deegen как библиотека/фреймворк". Сроки в таблице ниже исправлены.
+
+Чтобы получить наш OneScript-VM через Deegen, два пути:
 
 ## Путь A — переводчик OneScript bytecode → Lua bytecode
 
@@ -51,41 +60,49 @@
 
 ## Путь B — собственный VM через Deegen meta-compiler
 
-Идея: реализовать OneScript как полноценный язык в Deegen-стиле — наши опкоды, наш value model, наш runtime.
+Идея: использовать `deegen/` (мета-компилятор) и `drt/` (TValue + heap helpers) как библиотеку, написать свой набор аннотированных опкодов + минимальный runtime для OneScript.
 
 ### Что нужно
 
-1. **Форкнуть Deegen** или сделать отдельный submodule поверх Deegen libraries.
-2. **Заменить Lua runtime** в `runtime/` на OneScript runtime:
-   - Свой `TValue` (можно переиспользовать NaN-boxing layout): tDouble, tBool, tNil, tString, tHeapObj.
-   - Свой `init_global_object` (instead of init Lua globals).
-   - Убрать Lua parser/lexer — нам не нужны, мы загружаем готовый bytecode.
-   - Свой loader `.osbin` (С++).
-3. **Переписать `annotated/bytecodes/`** под OneScript-опкоды:
-   - 25+ опкодов из stub (Add, Sub, Mul, ..., CallFunc, CallProc, Return, etc.) аннотируем через Deegen DSL.
+1. **Подключить Deegen как зависимость**. Не форк — наша `vm/` директория подтягивает `third_party/deegen/deegen/` и `third_party/deegen/drt/` через CMake.
+2. **Использовать готовый `TValue`** из `drt/tvalue.h`. Нам уже доступно:
+   - `tNil` — для `Неопределено` ✓
+   - `tBool` — для `Булево` ✓
+   - `tDouble` — для `Число` ✓
+   - `tHeapEntity` — для будущих heap-объектов (`Строка`, `Массив`, `Структура`)
+3. **Написать `vm/annotated/bytecodes/onescript.cpp`** под наши опкоды:
+   - 25+ опкодов из stub аннотируем через Deegen DSL: `DEEGEN_DEFINE_BYTECODE(Add) { ... }`.
+   - Типовые гарды через `Op("lhs").HasType<tDouble>()` — даёт JIT speculations.
    - ArgNum, MakeRawValue, LineNum — простейшие, no-ops или вспомогательные.
-   - CallFunc с SDO method-bias logic — отдельный challenge.
-4. **Перепилить main.cpp / `luajitr` entrypoint** под наш runtime.
-5. **Сборка** — modify CMakeLists.txt либо отдельная сборка с подменёнными `runtime/`.
+   - CallFunc с SDO method-bias logic — главный нетривиальный опкод.
+4. **Минимальный runtime** в `vm/drt-ext/`:
+   - Frame layout: совместимый с Deegen ExecutionFrame (или адаптер).
+   - `Сообщить` как built-in lib function через `api_define_lib_function.h`.
+   - **GC не нужен** на PoC (только value-типы, без heap).
+5. **Свой `main.cpp`** — загружает `.osbin`, конвертит в Deegen `CodeBlock`, запускает.
+6. **Сборка** через тот же Docker image (Clang с GHC CC), но отдельный CMake target.
 
 ### Плюсы
 
 - **Настоящая нативная OneScript-VM** с JIT.
-- **Полная семантика** OneScript: Decimal-arithmetic (если нужно), specific error messages, exact stack traces.
-- **Расширяемость** — добавление новых опкодов делается в одном файле.
-- **Production-grade путь** — то что предлагается апстрим-разработчикам как новый backend.
+- **Полная семантика** OneScript: точные error messages, exact stack traces.
+- **Расширяемость** — добавление новых опкодов делается в одном `.cpp` файле.
+- **Production-grade путь** — то что можно предлагать апстрим-разработчикам как новый backend.
 
 ### Минусы
 
-- **Огромный объём работы**: 2-3 месяца full-time. Forking research-grade проекта = постоянная боль с rebases на upstream.
-- **Глубокое погружение в Deegen internals**: TValue layout, RegAllocHint, DfgVariant, GHC CC nuances. Документация тонкая.
-- **Может потребоваться апстрим-фикс** в Deegen для нетипичных опкодов (SDO bias, sigle Return at end, etc.).
+- **Объём работы средний**: 3-6 недель на стартовый PoC (5 опкодов + fib), 2-3 месяца на полную замену stub-а. Не "форк всего", а использование Deegen как библиотеки.
+- **Глубокое погружение в Deegen DSL**: TValue layout, RegAllocHint, DfgVariant, GHC CC nuances. Документация тонкая, основной источник — paper + код LJR.
+- **Зависимость от research-grade проекта**: Deegen в активной разработке, breaking changes возможны. Желательно зафиксировать на конкретном commit.
 
 ## Рекомендация
 
-**Для пича сообществу** — Путь A (transpiler). Меньшая инвестиция (3-6 недель), достаточная для демонстрации потенциала. Цифры будут реальные.
+Обе оценки пересмотрены вниз после повторного прохода:
 
-**Для production replacement** — Путь B. Только если апстрим OneScript-команда заинтересована и готова поддержать.
+- **Путь A** (transpiler): 2-3 недели на работающий fib + бенчмарки. Косвенно, но **очень быстро**.
+- **Путь B** (Deegen-DSL VM): 3-6 недель на работающий spike, 2-3 месяца на полное покрытие. **Прямо и production-friendly**.
+
+Для **пича сообществу** разумно: начать с Пути A, получить первые цифры за 2 недели. Если speedup впечатляет и есть интерес — переключиться на Путь B как long-term направление.
 
 ## Конкретные следующие шаги
 
