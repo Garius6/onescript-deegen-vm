@@ -12,6 +12,20 @@
 >
 > Цель PoC — продемонстрировать **идею** (Deegen + OneScript bytecode) и собрать обратную связь сообщества, а не отгрузить production-ready решение.
 
+> ## 🚧 СТАТУС: Phase 1 (stub). Deegen НЕ интегрирован
+>
+> Несмотря на название репо, **Deegen JIT в этом репозитории ещё не использован**. Сейчас в VM работает простой `switch`-based интерпретатор на C++ (`vm/src/interp.cpp`). Цифры из секции TL;DR — реальные замеры этого stub-а.
+>
+> **Что про Deegen уже сделано:**
+> - Клон Deegen лежит в `third_party/deegen/` (не собирался).
+> - Архитектура pipeline спроектирована так, чтобы stub можно было заменить на Deegen-generated VM без переделки остального.
+>
+> **Что про Deegen НЕ сделано:**
+> - Сборка Deegen (требует Linux x86-64 + Docker, отдельная задача).
+> - Аннотация опкодов в Deegen-DSL.
+> - Замена `switch`-loop на copy-and-patch stencils.
+> - Все цифры "ожидаемо 15-50×" про Phase 2 — **спекуляция**, не результат. См. `docs/expectations.md` если/когда появится с обоснованием.
+
 ---
 
 **Proof-of-concept альтернативной высокопроизводительной VM для [OneScript](https://github.com/EvilBeaver/OneScript).**
@@ -29,9 +43,9 @@
 | `nbody(50000 шагов)` 3-body sim   | 2.006 s | **0.287 s** | **6.99×** |
 | Холодный старт                    | ~600 ms (.NET + JIT warmup) | ~10 ms | ~60× |
 
-Геометрическое среднее: **~6×** на compute-heavy задачах. **Без какого-либо JIT** — это просто `switch`-based интерпретатор на C++. При подключении baseline JIT через [Deegen](https://github.com/luajit-remake/luajit-remake) (Haoran Xu, copy-and-patch compilation) ожидаем дополнительный 5-15× поверх.
+Геометрическое среднее: **~6×** на compute-heavy задачах. **Без какого-либо JIT** — это просто `switch`-based интерпретатор на C++.
 
-Прогноз итогового speedup vs текущий апстрим-интерпретатор: **30-100×** на compute-heavy скриптах.
+> **Прогноз (не результат)**: при подключении baseline JIT через [Deegen](https://github.com/luajit-remake/luajit-remake) (Haoran Xu, copy-and-patch compilation) **ожидаем** дополнительный 5-15× поверх. Итог vs upstream: ориентир 30-100×. **Эти числа — спекуляция**, основанная на paper-замерах Deegen-LJR (`+28% к LuaJIT interpreter` + baseline JIT speedup) и интерполяции от типичного gap CLR↔native. Реальные числа появятся когда Phase 2 будет сделан.
 
 ---
 
